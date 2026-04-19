@@ -1,4 +1,4 @@
-# ShopVerse - Full-Stack MERN E-Commerce Platform ⚡
+# Elixmart - Full-Stack MERN E-Commerce Platform ⚡
 
 A premium e-commerce web application built with MongoDB, Express.js, React, and Node.js.
 
