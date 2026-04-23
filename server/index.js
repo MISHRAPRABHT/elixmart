@@ -8,9 +8,27 @@ const errorHandler = require('./middleware/errorHandler');
 dotenv.config();
 
 const app = express();
+const PORT = process.env.PORT || 5000;
+
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION. Shutting down.');
+  console.error(err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('UNHANDLED REJECTION. Shutting down.');
+  console.error(reason);
+  process.exit(1);
+});
 
 // Middleware
-app.use(cors({ origin: [process.env.CLIENT_URL || 'http://localhost:5173', 'http://localhost:5174'], credentials: true }));
+app.use(
+  cors({
+    origin: [process.env.CLIENT_URL || 'http://localhost:5173', 'http://localhost:5174'],
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
@@ -35,17 +53,35 @@ app.get('/api/health', (req, res) => res.json({ status: 'ok', timestamp: new Dat
 // Error handler
 app.use(errorHandler);
 
-// Connect DB & Start
-const PORT = process.env.PORT || 5000;
+// Connect DB & start server only after successful connection
+const startServer = async () => {
+  const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI;
 
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/shopverse')
-  .then(() => {
-    console.log('✅ MongoDB connected');
-    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-  })
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err.message);
+  if (!mongoUri) {
+    console.error('Missing required environment variable: MONGO_URI');
+    console.error('Tip: set MONGO_URI in Render dashboard Environment settings.');
     process.exit(1);
-  });
+  }
+
+  if (!process.env.MONGO_URI && process.env.MONGODB_URI) {
+    console.warn('Using legacy env var MONGODB_URI. Please rename it to MONGO_URI in Render.');
+  }
+
+  try {
+    console.log('Connecting to MongoDB...');
+    await mongoose.connect(mongoUri);
+    console.log('MongoDB connected successfully');
+
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (err) {
+    console.error('MongoDB connection failed.');
+    console.error(err);
+    process.exit(1);
+  }
+};
+
+startServer();
 
 module.exports = app;
