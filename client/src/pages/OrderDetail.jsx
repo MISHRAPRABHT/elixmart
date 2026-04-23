@@ -1,8 +1,10 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchOrder } from '../store/slices/orderSlice';
+import { fetchOrder, payRemaining } from '../store/slices/orderSlice';
 import { FiCheck, FiPackage, FiTruck, FiNavigation, FiCheckCircle, FiXCircle, FiArrowLeft } from 'react-icons/fi';
+import toast from 'react-hot-toast';
+import API from '../utils/api';
 
 const statusSteps = [
   { key: 'placed', label: 'Order Placed', icon: <FiCheck />, desc: 'Your order has been placed' },
@@ -16,13 +18,63 @@ export default function OrderDetail() {
   const { id } = useParams();
   const dispatch = useDispatch();
   const { order, loading } = useSelector(s => s.orders);
+  const [payingRemaining, setPayingRemaining] = useState(false);
 
   useEffect(() => { dispatch(fetchOrder(id)); }, [dispatch, id]);
+
+  const handlePayRemaining = async () => {
+    if (!order || order.remainingAmount <= 0) return;
+    setPayingRemaining(true);
+    try {
+      const { data: rpOrder } = await API.post('/payment/create-order', { amount: order.remainingAmount });
+      if (rpOrder.mockMode) {
+        await dispatch(payRemaining({
+          id: order._id,
+          paymentData: {
+            razorpayOrderId: rpOrder.id,
+            razorpayPaymentId: 'pay_mock_' + Date.now(),
+            razorpaySignature: 'mock_signature'
+          }
+        })).unwrap();
+        toast.success('Remaining balance paid successfully!');
+        setPayingRemaining(false);
+        return;
+      }
+      const { data: keyData } = await API.get('/payment/key');
+      const options = {
+        key: keyData.key, amount: rpOrder.amount, currency: rpOrder.currency,
+        name: 'Elixmart', description: 'Remaining Balance Payment', order_id: rpOrder.id,
+        handler: async (response) => {
+          try {
+            const { data: verification } = await API.post('/payment/verify', response);
+            if (verification.verified) {
+              await dispatch(payRemaining({
+                id: order._id,
+                paymentData: {
+                  razorpayOrderId: response.razorpay_order_id,
+                  razorpayPaymentId: response.razorpay_payment_id,
+                  razorpaySignature: response.razorpay_signature
+                }
+              })).unwrap();
+              toast.success('Remaining balance paid successfully!');
+            } else { toast.error('Payment verification failed'); }
+          } catch (err) { toast.error('Failed to update payment'); }
+          setPayingRemaining(false);
+        },
+        theme: { color: '#6366f1' }
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.on('payment.failed', () => { setPayingRemaining(false); toast.error('Payment failed'); });
+      rzp.open();
+    } catch (err) { toast.error(err.message || 'Payment failed'); setPayingRemaining(false); }
+  };
 
   if (loading || !order) return <div className="loader"><div className="spinner" /></div>;
 
   const currentIdx = statusSteps.findIndex(s => s.key === order.status);
   const isCancelled = order.status === 'cancelled';
+  const isAdvance = order.paymentMode === 'advance';
+  const hasRemaining = isAdvance && order.remainingAmount > 0;
 
   return (
     <div className="container fade-in">
@@ -83,11 +135,42 @@ export default function OrderDetail() {
           <div className="cart-summary">
             <h3>Order Summary</h3>
             <div className="row"><span>Status</span><span className={`badge badge-${order.status}`}>{order.status}</span></div>
-            <div className="row"><span>Payment</span><span className={`badge badge-${order.paymentInfo?.status === 'paid' ? 'delivered' : 'placed'}`}>{order.paymentInfo?.status}</span></div>
+            <div className="row"><span>Payment</span><span className={`badge badge-${order.paymentInfo?.status === 'paid' ? 'delivered' : order.paymentInfo?.status === 'partial' ? 'shipped' : 'placed'}`}>{order.paymentInfo?.status}</span></div>
+            {isAdvance && <div className="row"><span>Payment Mode</span><span className="badge badge-shipped">Advance</span></div>}
             <div className="row"><span>Items Total</span><span>₹{order.itemsTotal?.toLocaleString()}</span></div>
             <div className="row"><span>Shipping</span><span>{order.shippingCost === 0 ? 'FREE' : `₹${order.shippingCost}`}</span></div>
             <div className="row"><span>Tax</span><span>₹{order.tax?.toLocaleString()}</span></div>
             <div className="total"><span>Total</span><span>₹{order.totalAmount?.toLocaleString()}</span></div>
+
+            {isAdvance && (
+              <>
+                <div style={{ borderTop: '1px dashed var(--border)', margin: '12px 0', paddingTop: 12 }}>
+                  <div className="row" style={{ color: 'var(--accent)', fontWeight: 600 }}>
+                    <span>Advance Paid</span><span>₹{order.advanceAmount?.toLocaleString()}</span>
+                  </div>
+                  <div className="row" style={{ color: hasRemaining ? 'var(--danger, #ef4444)' : 'var(--accent)', fontWeight: 600 }}>
+                    <span>Remaining</span><span>{hasRemaining ? `₹${order.remainingAmount?.toLocaleString()}` : '₹0 (Paid)'}</span>
+                  </div>
+                  {order.remainingPaidAt && (
+                    <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                      Remaining paid on {new Date(order.remainingPaidAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    </p>
+                  )}
+                </div>
+
+                {hasRemaining && (
+                  <button
+                    className="btn btn-primary btn-block"
+                    onClick={handlePayRemaining}
+                    disabled={payingRemaining}
+                    style={{ marginTop: 12, background: 'linear-gradient(135deg, #f59e0b, #ef4444)', fontWeight: 600 }}
+                  >
+                    {payingRemaining ? 'Processing...' : `💰 Pay Remaining ₹${order.remainingAmount?.toLocaleString()}`}
+                  </button>
+                )}
+              </>
+            )}
+
             {order.estimatedDelivery && (
               <p style={{ textAlign: 'center', fontSize: '0.85rem', color: 'var(--accent)', marginTop: 12 }}>
                 Est. Delivery: {new Date(order.estimatedDelivery).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}
@@ -109,3 +192,4 @@ export default function OrderDetail() {
     </div>
   );
 }
+

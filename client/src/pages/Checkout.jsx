@@ -32,6 +32,8 @@ export default function Checkout() {
   const [animDir, setAnimDir] = useState('forward');
   const [pinLoading, setPinLoading] = useState(false);
   const [geoLoading, setGeoLoading] = useState(false);
+  const [paymentMode, setPaymentMode] = useState('full');
+  const [advancePercent, setAdvancePercent] = useState(50);
   const [address, setAddress] = useState({
     fullName: user?.name || '', phone: '', street: '', city: '', state: '', zipCode: '', country: 'India'
   });
@@ -48,6 +50,8 @@ export default function Checkout() {
   const shipping = subtotal > 500 ? 0 : 40;
   const tax = Math.round(subtotal * 0.18);
   const total = subtotal + shipping + tax;
+  const advanceAmount = paymentMode === 'advance' ? Math.round(total * advancePercent / 100) : total;
+  const remainingAmount = total - advanceAmount;
 
   // Pincode lookup using free India Post API
   const lookupPincode = async (pin) => {
@@ -105,41 +109,46 @@ export default function Checkout() {
   };
 
   const handlePayment = async () => {
+    const payAmount = paymentMode === 'advance' ? advanceAmount : total;
     try {
-      const { data: rpOrder } = await API.post('/payment/create-order', { amount: total });
+      const { data: rpOrder } = await API.post('/payment/create-order', { amount: payAmount });
       if (rpOrder.mockMode) {
         const orderData = {
           shippingAddress: address,
+          paymentMode,
+          advanceAmount: payAmount,
           paymentInfo: {
             razorpayOrderId: rpOrder.id,
             razorpayPaymentId: 'pay_mock_' + Date.now(),
             razorpaySignature: 'mock_signature',
-            method: 'razorpay', status: 'paid'
+            method: 'razorpay', status: paymentMode === 'advance' ? 'partial' : 'paid'
           }
         };
         const result = await dispatch(createOrder(orderData)).unwrap();
-        toast.success('Order placed successfully!');
+        toast.success(paymentMode === 'advance' ? 'Order placed with advance payment!' : 'Order placed successfully!');
         navigate(`/orders/${result._id}`);
         return;
       }
       const { data: keyData } = await API.get('/payment/key');
       const options = {
         key: keyData.key, amount: rpOrder.amount, currency: rpOrder.currency,
-        name: 'Elixmart', description: 'Order Payment', order_id: rpOrder.id,
+        name: 'Elixmart', description: paymentMode === 'advance' ? `Advance Payment (${advancePercent}%)` : 'Order Payment', order_id: rpOrder.id,
         handler: async (response) => {
           const { data: verification } = await API.post('/payment/verify', response);
           if (verification.verified) {
             const orderData = {
               shippingAddress: address,
+              paymentMode,
+              advanceAmount: payAmount,
               paymentInfo: {
                 razorpayOrderId: response.razorpay_order_id,
                 razorpayPaymentId: response.razorpay_payment_id,
                 razorpaySignature: response.razorpay_signature,
-                method: 'razorpay', status: 'paid'
+                method: 'razorpay', status: paymentMode === 'advance' ? 'partial' : 'paid'
               }
             };
             const result = await dispatch(createOrder(orderData)).unwrap();
-            toast.success('Payment successful! Order placed.');
+            toast.success(paymentMode === 'advance' ? 'Advance paid! Order placed.' : 'Payment successful! Order placed.');
             navigate(`/orders/${result._id}`);
           } else { toast.error('Payment verification failed'); }
         },
@@ -242,15 +251,55 @@ export default function Checkout() {
                 </p>
                 <button className="btn btn-secondary btn-sm mt-1" onClick={() => goToStep(1)} style={{ fontSize: '0.78rem' }}>Change Address</button>
               </div>
-              <div style={{ padding: 20, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', marginBottom: 24, border: '1px solid var(--border)' }}>
-                <h4 style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <FiCreditCard style={{ color: 'var(--primary)' }} /> Razorpay (Test Mode)
+
+              {/* Payment Mode Selection */}
+              <div style={{ padding: 20, background: 'var(--bg-elevated)', borderRadius: 'var(--radius-sm)', marginBottom: 20, border: '1px solid var(--border)' }}>
+                <h4 style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <FiCreditCard style={{ color: 'var(--primary)' }} /> Payment Mode
                 </h4>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Secure payment via Razorpay. In test mode, orders are created directly.</p>
+                <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                  <button
+                    className={`btn ${paymentMode === 'full' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setPaymentMode('full')}
+                    style={{ flex: 1, padding: '12px 16px', fontSize: '0.9rem', transition: 'all 0.2s' }}
+                  >
+                    💳 Full Payment
+                  </button>
+                  <button
+                    className={`btn ${paymentMode === 'advance' ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setPaymentMode('advance')}
+                    style={{ flex: 1, padding: '12px 16px', fontSize: '0.9rem', transition: 'all 0.2s' }}
+                  >
+                    🔀 Advance Payment
+                  </button>
+                </div>
+
+                {paymentMode === 'advance' && (
+                  <div style={{ padding: 16, background: 'var(--bg)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>Advance: {advancePercent}%</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--primary)' }}>₹{advanceAmount.toLocaleString()}</span>
+                    </div>
+                    <input
+                      type="range" min="20" max="80" value={advancePercent}
+                      onChange={e => setAdvancePercent(Number(e.target.value))}
+                      style={{ width: '100%', accentColor: 'var(--primary)', cursor: 'pointer' }}
+                    />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                      <span>Min 20%</span><span>Max 80%</span>
+                    </div>
+                    <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(99, 102, 241, 0.08)', borderRadius: 8, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                      ⚡ Remaining <strong>₹{remainingAmount.toLocaleString()}</strong> to be paid later
+                    </div>
+                  </div>
+                )}
+
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 12 }}>Secure payment via Razorpay. In test mode, orders are created directly.</p>
               </div>
+
               <button className="btn btn-primary btn-block btn-lg" onClick={handlePayment} disabled={loading}
                 style={{ background: 'linear-gradient(135deg, #10b981, #06b6d4)' }}>
-                {loading ? 'Processing...' : <>💳 Pay ₹{total.toLocaleString()}</>}
+                {loading ? 'Processing...' : <>💳 Pay ₹{advanceAmount.toLocaleString()}{paymentMode === 'advance' ? ` (Advance)` : ''}</>}
               </button>
             </div>
           </div>
@@ -273,6 +322,12 @@ export default function Checkout() {
           <div className="row"><span>Shipping</span><span>{shipping === 0 ? <span className="text-accent">FREE</span> : `₹${shipping}`}</span></div>
           <div className="row"><span>Tax (18% GST)</span><span>₹{tax.toLocaleString()}</span></div>
           <div className="total"><span>Total</span><span>₹{total.toLocaleString()}</span></div>
+          {paymentMode === 'advance' && (
+            <>
+              <div className="row" style={{ marginTop: 8, color: 'var(--accent)', fontWeight: 600 }}><span>Advance ({advancePercent}%)</span><span>₹{advanceAmount.toLocaleString()}</span></div>
+              <div className="row" style={{ color: 'var(--text-muted)' }}><span>Remaining</span><span>₹{remainingAmount.toLocaleString()}</span></div>
+            </>
+          )}
         </div>
       </div>
     </div>

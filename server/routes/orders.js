@@ -7,7 +7,7 @@ const { protect, isAdmin } = require('../middleware/auth');
 // POST /api/orders/create
 router.post('/create', protect, async (req, res, next) => {
   try {
-    const { shippingAddress, paymentInfo } = req.body;
+    const { shippingAddress, paymentInfo, paymentMode, advanceAmount } = req.body;
     const cart = await Cart.findOne({ user: req.user._id }).populate('items.product');
     if (!cart || cart.items.length === 0) return res.status(400).json({ message: 'Cart is empty' });
 
@@ -24,8 +24,19 @@ router.post('/create', protect, async (req, res, next) => {
     const tax = Math.round(itemsTotal * 0.18);
     const totalAmount = itemsTotal + shippingCost + tax;
 
+    // Determine advance vs full payment
+    const mode = paymentMode === 'advance' ? 'advance' : 'full';
+    const advance = mode === 'advance' ? Math.round(Number(advanceAmount) || 0) : totalAmount;
+    const remaining = totalAmount - advance;
+
     const order = await Order.create({
-      user: req.user._id, items, shippingAddress, paymentInfo,
+      user: req.user._id, items, shippingAddress, paymentInfo: {
+        ...paymentInfo,
+        status: mode === 'advance' ? 'partial' : paymentInfo.status
+      },
+      paymentMode: mode,
+      advanceAmount: advance,
+      remainingAmount: remaining,
       itemsTotal, shippingCost, tax, totalAmount,
       estimatedDelivery: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });
@@ -74,6 +85,47 @@ router.put('/:id/status', protect, isAdmin, async (req, res, next) => {
     order.statusHistory.push({ status, note: note || `Order ${status}`, timestamp: new Date() });
     if (status === 'shipped') order.trackingNumber = 'TRK' + Date.now();
     if (status === 'delivered') order.paymentInfo.status = 'paid';
+    await order.save();
+    res.json(order);
+  } catch (err) { next(err); }
+});
+
+// PUT /api/orders/:id/pay-remaining (Customer pays remaining balance)
+router.put('/:id/pay-remaining', protect, async (req, res, next) => {
+  try {
+    const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (order.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Not authorized' });
+    }
+    if (order.remainingAmount <= 0) {
+      return res.status(400).json({ message: 'No remaining balance to pay' });
+    }
+
+    order.remainingAmount = 0;
+    order.remainingPaidAt = new Date();
+    order.remainingPaymentInfo = { razorpayOrderId, razorpayPaymentId, razorpaySignature };
+    order.paymentInfo.status = 'paid';
+    order.statusHistory.push({ status: order.status, note: 'Remaining balance paid', timestamp: new Date() });
+    await order.save();
+    res.json(order);
+  } catch (err) { next(err); }
+});
+
+// PUT /api/orders/:id/collect-remaining (Admin collects remaining)
+router.put('/:id/collect-remaining', protect, isAdmin, async (req, res, next) => {
+  try {
+    const order = await Order.findById(req.params.id);
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+    if (order.remainingAmount <= 0) {
+      return res.status(400).json({ message: 'No remaining balance to collect' });
+    }
+
+    order.remainingAmount = 0;
+    order.remainingPaidAt = new Date();
+    order.paymentInfo.status = 'paid';
+    order.statusHistory.push({ status: order.status, note: 'Remaining balance collected by admin', timestamp: new Date() });
     await order.save();
     res.json(order);
   } catch (err) { next(err); }

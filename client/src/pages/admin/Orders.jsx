@@ -25,6 +25,14 @@ export default function Orders() {
     } catch (err) { toast.error('Failed'); }
   };
 
+  const collectRemaining = async (id) => {
+    try {
+      await API.put(`/orders/${id}/collect-remaining`);
+      toast.success('Remaining balance collected');
+      load();
+    } catch (err) { toast.error(err.response?.data?.message || 'Failed'); }
+  };
+
   const statuses = ['placed', 'confirmed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled'];
 
   return (
@@ -40,7 +48,7 @@ export default function Orders() {
       {loading ? <div className="loader"><div className="spinner" /></div> : (
         <div className="card">
           <table className="data-table">
-            <thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Remaining</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
             <tbody>
               {orders.map(o => (
                 <tr key={o._id}>
@@ -48,7 +56,17 @@ export default function Orders() {
                   <td>{o.user?.name}<br/><span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{o.user?.email}</span></td>
                   <td>{o.items?.length} items</td>
                   <td style={{ fontWeight: 600 }}>₹{o.totalAmount?.toLocaleString()}</td>
-                  <td><span className={`badge ${o.paymentInfo?.status === 'paid' ? 'badge-delivered' : 'badge-placed'}`}>{o.paymentInfo?.status}</span></td>
+                  <td><span className={`badge ${o.paymentInfo?.status === 'paid' ? 'badge-delivered' : o.paymentInfo?.status === 'partial' ? 'badge-shipped' : 'badge-placed'}`}>{o.paymentInfo?.status}</span></td>
+                  <td>
+                    {o.paymentMode === 'advance' && o.remainingAmount > 0 ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ color: 'var(--danger, #ef4444)', fontWeight: 600, fontSize: '0.85rem' }}>₹{o.remainingAmount?.toLocaleString()}</span>
+                        <button className="btn btn-secondary" style={{ padding: '2px 8px', fontSize: '0.7rem' }} onClick={() => collectRemaining(o._id)}>Collect</button>
+                      </div>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>—</span>
+                    )}
+                  </td>
                   <td><span className={`badge badge-${o.status}`}>{o.status}</span></td>
                   <td style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{new Date(o.createdAt).toLocaleDateString()}</td>
                   <td>
@@ -69,3 +87,4 @@ export default function Orders() {
     </AdminLayout>
   );
 }
+

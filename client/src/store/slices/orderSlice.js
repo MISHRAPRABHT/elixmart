@@ -16,6 +16,11 @@ export const fetchOrder = createAsyncThunk('orders/fetchOne', async (id, { rejec
   catch (err) { return rejectWithValue(err.response?.data?.message || 'Failed'); }
 });
 
+export const payRemaining = createAsyncThunk('orders/payRemaining', async ({ id, paymentData }, { rejectWithValue }) => {
+  try { const res = await API.put(`/orders/${id}/pay-remaining`, paymentData); return res.data; }
+  catch (err) { return rejectWithValue(err.response?.data?.message || 'Failed'); }
+});
+
 const orderSlice = createSlice({
   name: 'orders',
   initialState: { orders: [], order: null, loading: false, error: null },
@@ -30,9 +35,13 @@ const orderSlice = createSlice({
       .addCase(fetchOrders.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
       .addCase(fetchOrder.pending, (s) => { s.loading = true; })
       .addCase(fetchOrder.fulfilled, (s, a) => { s.loading = false; s.order = a.payload; })
-      .addCase(fetchOrder.rejected, (s, a) => { s.loading = false; s.error = a.payload; });
+      .addCase(fetchOrder.rejected, (s, a) => { s.loading = false; s.error = a.payload; })
+      .addCase(payRemaining.pending, (s) => { s.loading = true; })
+      .addCase(payRemaining.fulfilled, (s, a) => { s.loading = false; s.order = a.payload; })
+      .addCase(payRemaining.rejected, (s, a) => { s.loading = false; s.error = a.payload; });
   }
 });
 
 export const { clearOrder } = orderSlice.actions;
 export default orderSlice.reducer;
+

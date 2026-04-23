@@ -3,13 +3,13 @@ import toast from 'react-hot-toast';
 import { getAccessToken, setAccessToken, clearAccessToken } from './authToken';
 
 const API = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
   withCredentials: true,
 });
 
 // Separate client used only for refresh to avoid interceptor loops
 const RefreshAPI = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
   withCredentials: true,
 });
 
