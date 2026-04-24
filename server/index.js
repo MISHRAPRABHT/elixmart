@@ -55,12 +55,16 @@ app.use(errorHandler);
 
 // Connect DB & start server only after successful connection
 const startServer = async () => {
-  const mongoUri = process.env.MONGO_URI || process.env.MONGODB_URI;
+  const mongoUri = process.env.MONGO_URI || process.env.mongo_uri || process.env.MONGODB_URI;
 
   if (!mongoUri) {
     console.error('Missing required environment variable: MONGO_URI');
     console.error('Tip: set MONGO_URI in Render dashboard Environment settings.');
     process.exit(1);
+  }
+
+  if (!process.env.MONGO_URI && process.env.mongo_uri) {
+    console.warn('Using lowercase env var mongo_uri. Please rename it to MONGO_URI in Render.');
   }
 
   if (!process.env.MONGO_URI && process.env.MONGODB_URI) {
